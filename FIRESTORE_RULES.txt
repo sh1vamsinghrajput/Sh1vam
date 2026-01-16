@@ -1,0 +1,119 @@
+/* ================================================
+   FIRESTORE SECURITY RULES FOR SMM PANEL
+   Copy this to Firebase Console > Firestore > Rules
+   
+   SAFETY RULES:
+   - Users can READ ONLY their own document
+   - Users can WRITE ONLY through backend API
+   - Users CANNOT modify balance
+   - Admin can manage everything
+   - Orders are READ-ONLY for users
+   ================================================ */
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ================================================
+    // USERS COLLECTION
+    // ================================================
+    // Security: Users can only read/write their own documents
+    
+    match /users/{userId} {
+      // Users can read only their own document
+      allow read: if request.auth.uid == userId;
+      
+      // Users cannot directly write - only backend API can modify
+      allow write: if false;
+      
+      // Subcollection - not needed for this app
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+    
+    // Admin can read all users (simple check - in production, use custom claims)
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid in [
+        'admin@example.com',
+        // Add more admin UIDs here
+      ];
+    }
+
+    // ================================================
+    // ORDERS COLLECTION
+    // ================================================
+    // Security: Users can read only their own orders
+    
+    match /orders/{orderId} {
+      // Users can read only their own orders
+      allow read: if request.auth.uid == resource.data.uid;
+      
+      // Users cannot directly create - only backend API
+      allow create: if false;
+      
+      // Users cannot modify orders
+      allow update, delete: if false;
+      
+      // Admin can read all and update status
+      allow read: if request.auth != null && request.auth.uid in [
+        'admin@example.com',
+        // Add more admin UIDs here
+      ];
+      
+      allow update: if request.auth != null && request.auth.uid in [
+        'admin@example.com',
+        // Add more admin UIDs here
+      ] && request.resource.data.keys().hasOnly([
+        'status', 'updated_at'
+      ]);
+    }
+
+    // ================================================
+    // DEFAULT DENY
+    // ================================================
+    // Deny all other access
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+/* ================================================
+   NOTES ON THESE RULES
+   ================================================
+
+   WHY NO DIRECT WRITES?
+   - Balance must ONLY be modified by backend
+   - Prevents users from cheating/modifying balance
+   - All operations are logged on server-side
+   - User can verify balance on their profile
+
+   WHY TWO RULES FOR USERS COLLECTION?
+   - First rule: Allows user to read their own doc
+   - Second rule: Allows admin to read all docs
+   - Both rules must exist to cover all cases
+
+   CUSTOM CLAIMS (PRODUCTION):
+   In production, replace the hardcoded UID checks with:
+   
+   allow read, write: if request.auth.token.admin == true;
+   
+   Then set custom claims in your backend:
+   - firebase_admin.auth.set_custom_user_claims(uid, {'admin': True})
+
+   FIRESTORE INDEXES:
+   These queries need indexes:
+   1. /orders collection:
+      - uid (Ascending)
+      - created_at (Descending)
+   
+   2. /orders collection (filtered):
+      - uid (Ascending)
+      - status (Ascending)
+      - created_at (Descending)
+
+   Firebase will prompt to create indexes automatically when you query.
+
+   ================================================ */
